@@ -1,0 +1,368 @@
+' Zerolight Taksim Square LED Installation December 2006
+' Lead Developer: Burçkaan Gürgün
+' System Architecture: Developed for the PIC18F4620 microcontroller to orchestrate the LED infrastructure at Taksim Square.
+' Technical Specifications:
+'    •    Master Control: The system operates as a DMX Transmitter (Master), utilizing a custom-engineered RS-485 protocol for high-reliability communication.
+'    •    Receiving Architecture: Interfaced with hundreds of decentralized DMX Receivers based on the PIC16F648 (running custom firmware).
+'    •    Distributed Control: Each PIC16F648 receiver manages 8 individual single-color LED channels at unique addresses.
+'    •    Orchestration: A single PIC18F4620 serves as the primary system orchestrator, managing the synchronized data flow across the vast network of hundreds of addressed nodes.
+
+
+
+'Define LOADER_USED	1
+DEFINE PULSIN_MAX 80
+'DEFINE BUTTON_PAUSE 15
+DEFINE OSC 20
+
+
+CMCON     = 7          ' PortA = digital I/O
+VRCON     = 0          ' A/D Voltage reference disabled
+
+son1        VAR     Byte[4]
+son2        VAR     Byte[4]
+son3        VAR     Byte[4]
+son4        VAR     Byte[4]
+son5        VAR     Byte[4]
+son6        VAR     Byte[4]
+son7        VAR     Byte[4]
+son8        VAR     Byte[4]
+sn          VAR     Byte
+res1        var     Word
+res2        var     Word
+b0          VAR     res1.Byte0 ' b0 is the first byte of word res1
+b1          VAR     res1.Byte1 ' b1 is the second byte of word res2
+b2          VAR     res2.Byte0 ' b0 is the first byte of word res1
+b3          VAR     res2.Byte1 ' b1 is the second byte of word res2
+Clr         var     Byte[8]
+Counter     var     Word    'DMX Break signal receive
+deviceID    var     Byte    'Device ID starts with ID 1 3 Addresses
+aminus      var     Word    'Real Address starts with 0
+DMXPort     var     Word    'Real Address starts with 1
+DMXChnl     var     Byte    'Usually 3 addresses
+break1      var     Word    'break value for DMX transmit
+sendme      var     Byte    'First Byte to transmit
+ppp         var     Word    'pause uS between transmits
+MAB2        var     Byte    'pause uS for first transmits
+RAN1        var     Word    'Temp value for Random function
+dummy       var     Byte    'Dispose value for DMX
+x           var     Word    'DMX Counter till the right address
+y           var     Byte    'DMX Counter from the right address
+m           var     Byte    'DMX Counter from the right address
+k           var     Byte    'DMX Counter from the right address
+i2          var     Byte    'DMX Counter from the right address
+cnt         var     Byte    'DMX Counter from the right address
+i1          var     Byte    'DMX Counter from the right address
+n           var     Byte    'DMX Counter from the right address
+nn          var     Byte    'DMX Counter from the right address
+z           var     Byte    'DMX Counter from the right address
+kal         var     Byte    'DMX Counter from the right address
+z1          var     Byte    'DMX Counter from the right address
+z2          var     Byte    'DMX Counter from the right address
+dm1         var     Byte[8]'Transmit values for DMX repeat
+
+SPBRG = 4 
+sendme = 0
+break1 = 90
+MAB2 = 12    
+ppp = 3
+kal = 0
+
+TRISB = %00000010
+TRISA = %10100000 
+
+TXSTA = %00000100 ' Enable transmit and async mode and brgh=1 
+RCSTA = %00000000 ' Clear RCSTA to git rid of any errors 
+
+    dummy = RCREG
+    dummy = RCREG
+    RCSTA = %00000000           'Initialize and off the errors of USART
+    dummy = RCREG
+    dummy = RCREG
+
+deviceID = 1                       'Set Device ID
+DMXPort = 34'458'deviceID * 3 - 1                  'Determine DMX Port with data1[35] offset
+'DMXPort = DMXPort +  data1[35]
+aminus = DMXport - 1                        'First byte is 0 and the rest first aminus is 1
+DMXChnl = 8
+
+For n = 0 To 3
+    son1[n] = 0
+    son2[n] = 0
+    son3[n] = 0
+    son4[n] = 0
+    son5[n] = 0
+    son6[n] = 0
+    son7[n] = 0
+    son8[n] = 0
+Next n
+For n = 0 To 7
+    Clr[n] = 0
+Next n
+
+cnt = 0
+m = 0
+loop:
+    GoSub DMXCheck
+    GoSub enumA
+GoTo loop       ' Go back to loop and blink LED forever
+
+
+
+DMXCheck:
+    dummy = RCREG
+    dummy = RCREG
+    RCSTA = %00000000           'Initialize and off the errors of USART
+    dummy = RCREG
+    dummy = RCREG
+    x = 0
+    y = 0
+    PulsIn PORTB.1,0,Counter    'here I'm looking for the break signal
+    If (Counter > 39) Then
+        RCSTA = %10010000
+        GoSub DMXin
+    EndIf
+Return
+
+DMXin:
+bb1:
+    While PIR1.5 = 0:Wend
+    If (RCSTA.1 = 0) Then
+        dummy = RCREG           'discard it
+        If kal = 0 Then
+            PORTA.0 = son1.0(m)
+            PORTA.1 = son2.0(m)
+            PORTA.2 = son3.0(m)
+            kal = 1
+        Else
+            If kal = 1 Then   
+                PORTA.3 = son4.0(m)
+                PORTB.3 = son5.0(m)
+                PORTB.4 = son6.0(m)
+                kal = 2
+            Else
+                If kal = 2 Then
+                    PORTB.5 = son7.0(m)
+                    PORTB.6 = son8.0(m)
+                    If m = 31 Then
+                        m = 0
+                    Else
+                        m = m+1
+                    EndIf
+                    kal = 0
+                EndIf
+            EndIf
+        EndIf
+    Else
+        dummy = RCREG
+        dummy = RCREG
+        RCSTA = %00000000 'turn off the USART
+        GoSub enumA  
+        GoTo loop2
+    EndIf
+    x = x + 1
+    If (x < aminus) Then        'Keep discarding until address data is reached        
+        GoTo bb1
+    EndIf    
+bb2:
+    While PIR1.5 = 0:Wend
+    If ((RCSTA.1 = 0) And (RCSTA.2 = 0)) Then       'Data with no errors
+        dm1[y] = RCREG 
+        If kal = 0 Then
+            PORTA.0 = son1.0(m)
+            PORTA.1 = son2.0(m)
+            PORTA.2 = son3.0(m)
+            kal = 1
+        Else
+            If kal = 1 Then   
+                PORTA.3 = son4.0(m)
+                PORTB.3 = son5.0(m)
+                PORTB.4 = son6.0(m)
+                kal = 2
+            Else
+                If kal = 2 Then
+                    PORTB.5 = son7.0(m)
+                    PORTB.6 = son8.0(m)
+                    If m = 31 Then
+                        m = 0
+                    Else
+                        m = m+1
+                    EndIf
+                    kal = 0
+                EndIf
+            EndIf
+        EndIf
+    Else
+        dummy = RCREG
+        dummy = RCREG
+        RCSTA = %00000000 'turn off the USART  
+        GoSub enumA
+        GoTo loop2
+    EndIf
+    y = y + 1
+    If (y < dmxChnl) Then                           'RGB Data 3 channels
+        GoTo bb2
+    EndIf    
+    While PIR1.5 = 0:Wend
+    dummy = RCREG
+    dummy = RCREG
+    RCSTA = %00000000 'turn off the USART  
+    GoSub enumA
+    For z = 0 To 7
+        Clr[z] = dm1[z]
+    Next z
+loop2:
+    dummy = RCREG
+    dummy = RCREG
+    RCSTA = %00000000 'turn off the USART
+'    z1 = 0  
+'    for z = 0 to 31
+'         clr.0(z1) = dm1.0(z)
+'         z1 = z1 + 1
+'         z2 = z1//4
+'         if z2 = 0 then
+'            z1 = z1 + 4
+'         endif
+'    next z
+'    m = 31
+Return
+
+enumA:
+    PORTA.0 = son1.0(m)
+    PORTA.1 = son2.0(m)
+    PORTA.2 = son3.0(m)
+    PORTA.3 = son4.0(m)
+    PORTB.3 = son5.0(m)
+    PORTB.4 = son6.0(m)
+    PORTB.5 = son7.0(m)
+    PORTB.6 = son8.0(m)
+    If m = 31 Then
+        GoSub ColorAssign
+        m = 1
+    Else
+        m = m+1
+    EndIf
+    kal = 0
+Return
+
+
+ColorAssign:
+        n = 0
+        GoSub ClrSet
+        son1[0] = b0 
+        son1[1] = b1
+        son1[2] = b2
+        son1[3] = b3
+        PORTA.0 = son1.0(0)
+
+        n = 1
+        GoSub ClrSet
+        son2[0] = b0 
+        son2[1] = b1
+        son2[2] = b2
+        son2[3] = b3
+        PORTA.1 = son2.0(0)
+
+        n = 2
+        GoSub ClrSet
+        son3[0] = b0 
+        son3[1] = b1
+        son3[2] = b2
+        son3[3] = b3
+        PORTA.2 = son3.0(0)
+
+        n = 3
+        GoSub ClrSet
+        son4[0] = b0 
+        son4[1] = b1
+        son4[2] = b2
+        son4[3] = b3
+        PORTA.3 = son4.0(0)
+
+        n = 4
+        GoSub ClrSet
+        son5[0] = b0 
+        son5[1] = b1
+        son5[2] = b2
+        son5[3] = b3
+        PORTB.3 = son5.0(0)
+
+        n = 5
+        GoSub ClrSet
+        son6[0] = b0 
+        son6[1] = b1
+        son6[2] = b2
+        son6[3] = b3
+        PORTB.4 = son6.0(0)
+
+        n = 6
+        GoSub ClrSet
+        son7[0] = b0 
+        son7[1] = b1
+        son7[2] = b2
+        son7[3] = b3
+        PORTB.5 = son7.0(0)
+
+        n = 7
+        GoSub ClrSet
+        son8[0] = b0 
+        son8[1] = b1
+        son8[2] = b2
+        son8[3] = b3
+        PORTB.6 = son8.0(0)
+
+Return
+ClrSet:
+    Select Case Clr[n] 
+        Case 15
+            res1 = 65535
+            res2 = 32767
+        Case 14
+            res1 = 24029
+            res2 = 24029
+        Case 13
+            res1 = 21973
+            res2 = 21973
+        Case 12
+            res1 = 21834
+            res2 = 21845
+        Case 11
+            res1 = 21834
+            res2 = 18762
+        Case 10
+            res1 = 18762
+            res2 = 18724
+        Case 9
+            res1 = 35090
+            res2 = 9288
+        Case 8
+            res1 = 17476
+            res2 = 17476
+        Case 7
+            res1 = 2180
+            res2 = 16913
+        Case 6
+            res1 = 4228
+            res2 = 2114
+        Case 5
+            res1 = 33288
+            res2 = 2080
+        Case 4
+            res1 = 2064
+            res2 = 1028
+        Case 3
+            res1 = 32832
+            res2 = 256
+        Case 2
+            res1 = 1024
+            res2 = 64
+        Case 1
+            res1 = 32768
+            res2 = 0
+        Case 0
+            res1 = 0
+            res2 = 0
+    End Select    
+Return
+
+
+End
